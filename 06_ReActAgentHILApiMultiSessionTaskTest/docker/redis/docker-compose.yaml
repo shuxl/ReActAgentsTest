@@ -15,7 +15,7 @@ services:
     volumes:
       - redis-data:/data
     # 确保容器在重启时自动启动
-    restart: unless-stopped
+    # restart: unless-stopped
     # 健康检查：验证 Redis 服务是否正常运行
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]

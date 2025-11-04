@@ -1,6 +1,7 @@
 import asyncio
+import os
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent  # 使用新的 API，替代已弃用的 langgraph.prebuilt.create_react_agent
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain.chat_models import init_chat_model
@@ -12,11 +13,20 @@ from typing import Dict, List, Any
 
 
 # 使用langgraph推荐方式定义大模型
+# 根据 DeepSeek API 文档: https://api-docs.deepseek.com/zh-cn/
+# 模型名称: deepseek-chat (非思考模式) 或 deepseek-reasoner (思考模式)
+# base_url: https://api.deepseek.com (langchain 会自动添加 /v1 路径)
+# API Key 从环境变量读取，如果未设置则使用默认值（请确保设置环境变量）
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+print(f"DEEPSEEK_API_KEY:{DEEPSEEK_API_KEY}")
+if DEEPSEEK_API_KEY == "":
+    raise ValueError("请设置环境变量 DEEPSEEK_API_KEY")
+
 llm = init_chat_model(
-    model="openai:deepseek-v3",
+    model="openai:deepseek-chat",  # 使用 deepseek-chat 模型，如需思考模式可改为 deepseek-reasoner
     temperature=0,
-    base_url="https://nangeai.top/v1",
-    api_key="sk-1N7kCCLpLMs58uCPGt333cl0sttCxmU7OY23238OMTpREAdEEK"
+    base_url="https://api.deepseek.com",
+    api_key=DEEPSEEK_API_KEY
 )
 
 
@@ -104,10 +114,16 @@ def save_graph_visualization(graph, filename: str = "graph.png") -> None:
 # 定义并运行agent
 async def run_agent():
     # 实例化MCP Server客户端
+    # 高德地图 MCP Server Key 从环境变量读取
+    AMAP_MCP_KEY = os.getenv("AMAP_MCP_KEY")
+    print(f"AMAP_MCP_KEY:{AMAP_MCP_KEY}")
+    if AMAP_MCP_KEY == "":
+        raise ValueError("请设置环境变量 AMAP_MCP_KEY")
+    
     client = MultiServerMCPClient({
         # 高德地图MCP Server
         "amap-amap-sse": {
-            "url": "https://mcp.amap.com/sse?key=9bc2bca8f0fb637ecc80a4943g3123b60s53cf",
+            "url": f"https://mcp.amap.com/sse?key={AMAP_MCP_KEY}",
             "transport": "sse",
         }
     })
@@ -119,17 +135,18 @@ async def run_agent():
     # 基于内存存储的short-term
     checkpointer = InMemorySaver()
 
-    # 定义系统消息，指导如何使用工具
-    system_message = SystemMessage(content=(
-        "你是一个AI助手，使用高德地图工具获取信息。"
-    ))
+    # 定义系统提示词，指导如何使用工具
+    # 注意：新的 create_agent API 使用 system_prompt 参数（字符串类型）
+    # 而不是 prompt 参数（SystemMessage 类型）
+    system_prompt = "你是一个AI助手，使用高德地图工具获取信息。"
 
     # 创建ReAct风格的agent
-    agent = create_react_agent(
+    # 使用新的 API: langchain.agents.create_agent
+    # 替代已弃用的 langgraph.prebuilt.create_react_agent
+    agent = create_agent(
         model=llm,
         tools=tools,
-        prompt=system_message,
-        # prompt=f"你是一个乐于助人的AI助手。",
+        system_prompt=system_prompt,  # 新 API 使用 system_prompt（字符串）而不是 prompt（SystemMessage）
         checkpointer=checkpointer
     )
 
