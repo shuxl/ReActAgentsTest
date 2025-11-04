@@ -1,16 +1,18 @@
 import asyncio
-from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import SystemMessage, HumanMessage
-from langchain.chat_models import init_chat_model
 from typing import Dict, List, Any
 from typing import Callable
 from langchain_core.tools import BaseTool, tool as create_tool
 from langgraph.prebuilt.interrupt import HumanInterruptConfig, HumanInterrupt
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt, Command
-
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.llms import get_deepseek_llm
+from utils.mcp_client import get_amap_mcp_client
 
 
 
@@ -18,12 +20,8 @@ from langgraph.types import interrupt, Command
 
 
 # 使用langgraph推荐方式定义大模型
-llm = init_chat_model(
-    model="openai:deepseek-v3",
-    temperature=0,
-    base_url="https://nangeai.top/v1",
-    api_key="sk-d8bOCyecbFvA32jxj9GViJ3221akRcp5CQTlaUWnPLxvwD14rImbp0"
-)
+# 通过工具类初始化 DeepSeek LLM
+llm = get_deepseek_llm()
 
 
 # 定义一个函数，用于为工具添加人工审查（human-in-the-loop）功能
@@ -179,13 +177,8 @@ def save_graph_visualization(graph, filename: str = "graph.png") -> None:
 # 定义并运行agent
 async def run_agent():
     # 实例化MCP Server客户端
-    client = MultiServerMCPClient({
-        # 高德地图MCP Server
-        "amap-amap-sse": {
-            "url": "https://mcp.amap.com/sse?key=9bc2bffca80fbf67ecc8f0ar49ff43313b6053cf",
-            "transport": "sse",
-        }
-    })
+    # 通过工具类初始化高德地图 MCP Server 客户端
+    client = get_amap_mcp_client(env_key_name="AMAP_MCP_KEY")
 
     # # 从MCP Server中获取可提供使用的全部工具
     all_tools = await client.get_tools()
@@ -226,8 +219,8 @@ async def run_agent():
     # (1)模拟人类反馈：测试3种反馈方式
     agent_response = await agent.ainvoke(
         # Command(resume=[{"type": "accept"}]),
-        # Command(resume=[{"type": "edit", "args": {"args": {'location': '120.619585,31.299379'}}}]),
-        Command(resume=[{"type": "response", "args": "我不想查询了"}]),
+        Command(resume=[{"type": "edit", "args": {"args": {'location': '120.619585,31.299379'}}}]),
+        # Command(resume=[{"type": "response", "args": "我不想查询了"}]),
         config
     )
     # 将返回的messages进行格式化输出

@@ -15,8 +15,11 @@ import redis.asyncio as redis
 import json
 from datetime import timedelta
 from psycopg_pool import AsyncConnectionPool
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.config import Config
-from utils.llms import get_llm
+from utils.llms import get_llm_by_config
 from utils.tools import get_tools
 
 
@@ -358,7 +361,9 @@ async def lifespan(app: FastAPI):
         logger.info("Redis初始化成功")
 
         # 创建Chat模型
-        llm_chat, llm_embedding = get_llm(Config.LLM_TYPE)
+        # 使用外层utils的llms.py中的get_llm_by_config方法
+        # 该方法会根据Config中的LLM_TYPE自动选择对应的LLM初始化方法
+        llm_chat = get_llm_by_config()
         logger.info("Chat模型初始化成功")
 
         # 创建数据库连接池 动态连接池根据负载调整连接池大小

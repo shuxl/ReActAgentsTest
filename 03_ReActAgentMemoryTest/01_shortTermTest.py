@@ -1,11 +1,14 @@
 import asyncio
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from langchain_core.tools import tool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import SystemMessage, HumanMessage
-from langchain.chat_models import init_chat_model
 from typing import Dict, List, Any
 from langchain_core.messages.utils import count_tokens_approximately, trim_messages
+from utils.llms import get_deepseek_llm
 
 
 
@@ -13,12 +16,8 @@ from langchain_core.messages.utils import count_tokens_approximately, trim_messa
 
 
 # 使用langgraph推荐方式定义大模型
-llm = init_chat_model(
-    model="openai:deepseek-v3",
-    temperature=0,
-    base_url="https://nangeai.top/v1",
-    api_key="sk-gOICqMerPEOUrXwi0xadESaAoTikvn1zoGKUuFE3dli82NxY"
-)
+# 通过工具类初始化 DeepSeek LLM
+llm = get_deepseek_llm()
 
 
 # @tool("book_hotel",description="提供预订酒店的工具")
@@ -145,7 +144,7 @@ async def run_agent():
     ))
 
     # 基于数据库持久化存储的short-term
-    db_uri = "postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable"
+    db_uri = "postgresql://postgres:sxl_pwd_123@localhost:5433/sxl_pg_db1?sslmode=disable"
 
     # short-term短期记忆 实例化PostgresSaver对象 并初始化checkpointer
     async with AsyncPostgresSaver.from_conn_string(db_uri) as checkpointer:
@@ -172,10 +171,10 @@ async def run_agent():
         # print(f"当前状态内容:{state_result}")
 
         # 将检索出的信息拼接到用户输入中
-        user_input = "我叫什么"
+        # user_input = "我叫什么"
         # user_input = "我是南哥"
         # user_input = "我叫什么"
-        # user_input = "预定一个汉庭酒店"
+        user_input = "预定一个汉庭酒店"
         # user_input = f"我叫什么"
 
 

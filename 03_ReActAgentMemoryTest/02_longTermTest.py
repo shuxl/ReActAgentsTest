@@ -1,12 +1,15 @@
 import asyncio
 import uuid
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from langchain_core.tools import tool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import SystemMessage, HumanMessage, trim_messages
-from langchain.chat_models import init_chat_model
 from typing import Dict, List, Any
 from langgraph.store.postgres import AsyncPostgresStore
+from utils.llms import get_deepseek_llm
 
 
 
@@ -14,12 +17,8 @@ from langgraph.store.postgres import AsyncPostgresStore
 
 
 # 使用langgraph推荐方式定义大模型
-llm = init_chat_model(
-    model="openai:deepseek-v3",
-    temperature=0,
-    base_url="https://nangeai.top/v1",
-    api_key="sk-gOICqMerPEOUrXwi0xadESaAoTikvn1zoGKUuFE3dli82NxY"
-)
+# 通过工具类初始化 DeepSeek LLM
+llm = get_deepseek_llm()
 
 
 # @tool("book_hotel",description="提供预订酒店的工具")
@@ -146,7 +145,7 @@ async def run_agent():
     ))
 
     # 基于数据库持久化存储的short-term
-    db_uri = "postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable"
+    db_uri = "postgresql://postgres:sxl_pwd_123@localhost:5433/sxl_pg_db1?sslmode=disable"
 
     # short-term短期记忆 实例化PostgresSaver对象 并初始化checkpointer
     # long-term长期记忆 实例化PostgresStore对象 并初始化store
@@ -183,7 +182,7 @@ async def run_agent():
         print(f"检索的信息为:{info}")
 
         # 将检索出的信息拼接到用户输入中
-        user_input = f"预定一个汉庭酒店,我的附加信息有:{info}"
+        user_input = f"预定一个汉庭酒店（酒店为上海迪士尼店）,我的附加信息有:{info}"
 
         # # 自定义存储逻辑 对用户输入进行处理，检查是否需要存储长期记忆
         # namespace = ("memories", config["configurable"]["user_id"])

@@ -1,15 +1,18 @@
 import asyncio
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent  # 使用新的 API，替代已弃用的 langgraph.prebuilt.create_react_agent
 from langchain_core.messages import SystemMessage, HumanMessage
-from langchain.chat_models import init_chat_model
 from typing import Dict, List, Any
 from typing import Callable
 from langchain_core.tools import BaseTool, tool as create_tool
 from langgraph.prebuilt.interrupt import HumanInterruptConfig, HumanInterrupt
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt, Command
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.llms import get_deepseek_llm
 
 
 
@@ -18,12 +21,8 @@ from langgraph.types import interrupt, Command
 
 
 # 使用langgraph推荐方式定义大模型
-llm = init_chat_model(
-    model="openai:deepseek-v3",
-    temperature=0,
-    base_url="https://nangeai.top/v1",
-    api_key="sk-d8bOCyecbFvAj2xj9G3tViJ3akRcp25CQTl3eaUWnPLxvewD14rImbp0"
-)
+# 通过工具类初始化 DeepSeek LLM
+llm = get_deepseek_llm()
 
 
 # 定义一个函数，用于为工具添加人工审查（human-in-the-loop）功能
@@ -191,16 +190,18 @@ async def run_agent():
     # 基于内存存储的short-term
     checkpointer = InMemorySaver()
 
-    # 定义系统消息
-    system_message = SystemMessage(content=(
-        "你是一个AI助手。"
-    ))
+    # 定义系统提示词，指导如何使用工具
+    # 注意：新的 create_agent API 使用 system_prompt 参数（字符串类型）
+    # 而不是 prompt 参数（SystemMessage 类型）
+    system_prompt = "你是一个AI助手。"
 
     # 创建ReAct风格的agent
-    agent = create_react_agent(
+    # 使用新的 API: langchain.agents.create_agent
+    # 替代已弃用的 langgraph.prebuilt.create_react_agent
+    agent = create_agent(
         model=llm,
         tools=tools,
-        prompt=system_message,
+        system_prompt=system_prompt,  # 新 API 使用 system_prompt（字符串）而不是 prompt（SystemMessage）
         checkpointer=checkpointer
     )
 
@@ -219,9 +220,9 @@ async def run_agent():
 
     # (1)模拟人类反馈：测试3种反馈方式
     agent_response = agent.invoke(
-        Command(resume=[{"type": "accept"}]),
+        # Command(resume=[{"type": "accept"}]),
         # Command(resume=[{"type": "edit", "args": {"args": {"hotel_name": "汉庭酒店(软件园店)"}}}]),
-        # Command(resume=[{"type": "response", "args": "我不想预定这个酒店了"}]),
+        Command(resume=[{"type": "response", "args": "我不想预定这个酒店了"}]),
         config
     )
     # 将返回的messages进行格式化输出
