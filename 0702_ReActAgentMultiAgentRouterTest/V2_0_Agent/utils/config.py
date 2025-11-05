@@ -13,7 +13,7 @@ class Config:
     BACKUP_COUNT = 3
 
     # PostgreSQL数据库配置参数
-    DB_URI = os.getenv("DB_URI", "postgresql://postgres:sxl_pwd_123@localhost:5433/sxl_pg_db1?sslmode=disable")
+    DB_URI = os.getenv("DB_URI", "postgresql://postgres:sxl_pwd_123@localhost:5433/doctor_agent_db?sslmode=disable")
     MIN_SIZE = 5  # 连接池最小连接数
     MAX_SIZE = 10  # 连接池最大连接数
 

@@ -23,25 +23,25 @@ def router_node(state: RouterState) -> RouterState:
     Returns:
         RouterState: 更新后的路由状态
     """
-    # 获取最后一条用户消息
+    # 获取最后一条消息
     messages = state.get("messages", [])
     if not messages:
         logger.warning("没有消息，返回未更新状态")
         return state
     
     last_message = messages[-1]
-    user_query = ""
     
+    # 关键修复：如果最后一条消息是AI消息，说明没有新的用户消息，应该停止执行
+    # 这可以防止无限循环：router -> agent -> router -> ...
+    if isinstance(last_message, AIMessage):
+        logger.info("最后一条消息是AI消息，没有新的用户消息，停止路由执行")
+        # 直接返回当前状态，不进行路由决策
+        return state
+    
+    # 获取用户查询
+    user_query = ""
     if isinstance(last_message, HumanMessage):
         user_query = last_message.content
-    elif isinstance(last_message, AIMessage):
-        # 如果是AI消息，可能是澄清后的回复，需要从历史中找用户消息
-        user_messages = [msg for msg in messages if isinstance(msg, HumanMessage)]
-        if user_messages:
-            user_query = user_messages[-1].content
-        else:
-            logger.warning("找不到用户消息")
-            return state
     else:
         user_query = str(last_message.content) if hasattr(last_message, 'content') else str(last_message)
     
@@ -170,7 +170,7 @@ def clarify_intent_node(state: RouterState) -> RouterState:
         return updated_state
 
 
-def route_decision(state: RouterState) -> Literal["blood_pressure", "appointment", "doctor_assistant", "unclear"]:
+def route_decision(state: RouterState) -> Literal["blood_pressure", "appointment", "doctor_assistant", "unclear", "__end__"]:
     """
     路由决策函数
     根据当前意图返回路由目标节点名称
@@ -179,8 +179,17 @@ def route_decision(state: RouterState) -> Literal["blood_pressure", "appointment
         state: 路由状态
         
     Returns:
-        Literal: 路由目标节点名称
+        Literal: 路由目标节点名称，如果是"__end__"则停止执行
     """
+    # 检查是否有新的用户消息
+    messages = state.get("messages", [])
+    if messages:
+        last_message = messages[-1]
+        # 如果最后一条消息是AI消息，停止执行
+        if isinstance(last_message, AIMessage):
+            logger.info("路由决策: 最后一条消息是AI消息，停止执行")
+            return "__end__"  # type: ignore
+    
     current_intent = state.get("current_intent", "unclear")
     
     logger.info(f"路由决策: current_intent={current_intent}")

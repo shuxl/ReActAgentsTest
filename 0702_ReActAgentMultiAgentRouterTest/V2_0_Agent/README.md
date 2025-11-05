@@ -1,4 +1,4 @@
-# V2.0 多智能体路由系统 - 里程碑1和里程碑2交付物
+# V2.0 多智能体路由系统 - 里程碑1、2和3交付物
 
 ## 项目结构
 
@@ -13,15 +13,18 @@ V2_0_Agent/
 │   ├── router_state.py        # 路由状态数据结构
 │   ├── router.py              # 路由节点实现
 │   ├── router_graph.py        # 路由图创建
-│   ├── agents/                # 专门智能体模块（待实现）
-│   │   └── __init__.py
+│   ├── agents/                # 专门智能体模块
+│   │   ├── __init__.py
+│   │   └── blood_pressure_agent.py  # 血压记录智能体实现
 │   └── tools/                 # 工具模块
 │       ├── __init__.py
-│       └── router_tools.py    # 路由工具实现
+│       ├── router_tools.py    # 路由工具实现
+│       └── blood_pressure_tools.py  # 血压记录工具实现
 ├── logfile/                   # 日志文件目录
 ├── test_db_connection.py      # 数据库连接测试脚本
 ├── test_redis_connection.py  # Redis连接测试脚本
 ├── test_router.py             # 路由功能单元测试
+├── create_blood_pressure_table.py  # 创建血压记录表脚本
 └── requirements.txt           # 依赖包列表
 ```
 
@@ -72,6 +75,12 @@ python test_redis_connection.py
 python test_router.py
 ```
 
+### 创建血压记录数据库表
+
+```bash
+python create_blood_pressure_table.py
+```
+
 ## 模块说明
 
 ### config.py
@@ -98,6 +107,12 @@ LLM初始化模块，支持根据配置自动选择合适的LLM模型。
 ### router_tools.py
 路由工具实现，包含identify_intent和clarify_intent工具。
 
+### blood_pressure_tools.py
+血压记录工具实现，包含record_blood_pressure、query_blood_pressure、update_blood_pressure、info工具。
+
+### blood_pressure_agent.py
+血压记录智能体实现，包含创建血压记录智能体和血压记录智能体节点。
+
 ## 里程碑1完成情况
 
 - ✅ 项目结构完整，符合设计文档要求
@@ -118,4 +133,15 @@ LLM初始化模块，支持根据配置自动选择合适的LLM模型。
 - ✅ route_decision能够根据意图正确路由
 - ✅ StateGraph路由图结构已创建（包含占位节点）
 - ✅ 路由功能单元测试已创建
+
+## 里程碑3完成情况
+
+- ✅ 数据库表结构已创建（create_blood_pressure_table.py）
+- ✅ record_blood_pressure工具能够保存血压数据
+- ✅ query_blood_pressure工具能够查询历史记录
+- ✅ update_blood_pressure工具能够更新记录
+- ✅ info工具能够返回统计信息
+- ✅ blood_pressure_agent_node函数已实现
+- ✅ 血压记录智能体（LangGraph）已创建
+- ✅ 已集成到路由图（router_graph.py）
 
