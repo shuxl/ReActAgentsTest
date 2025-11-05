@@ -1,4 +1,5 @@
 import logging
+import sys
 from concurrent_log_handler import ConcurrentRotatingFileHandler
 import time
 from fastapi import FastAPI, HTTPException
@@ -9,6 +10,10 @@ from langgraph.store.postgres import AsyncPostgresStore
 import uvicorn
 from contextlib import asynccontextmanager
 from psycopg_pool import AsyncConnectionPool
+
+from psycopg.rows import dict_row
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.config import Config
 from utils.tasks import celery_app, invoke_agent_task, resume_agent_task
 from utils.models import AgentRequest, InterruptResponse, SystemInfoResponse, LongMemRequest
@@ -24,22 +29,34 @@ from utils.redis import get_session_manager
 logger = logging.getLogger(__name__)
 # 设置日志器级别为DEBUG
 logger.setLevel(logging.DEBUG)
+# logger.setLevel(logging.INFO)
 logger.handlers = []  # 清空默认处理器
-# 使用ConcurrentRotatingFileHandler
-handler = ConcurrentRotatingFileHandler(
+
+# 添加控制台处理器（StreamHandler），输出到控制台
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.DEBUG)
+console_formatter = logging.Formatter(
+    "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+console_handler.setFormatter(console_formatter)
+logger.addHandler(console_handler)
+
+# 使用ConcurrentRotatingFileHandler，输出到文件
+file_handler = ConcurrentRotatingFileHandler(
     # 日志文件
     Config.LOG_FILE,
     # 日志文件最大允许大小为5MB，达到上限后触发轮转
-    maxBytes=Config.MAX_BYTES,
+    maxBytes = Config.MAX_BYTES,
     # 在轮转时，最多保留3个历史日志文件
-    backupCount=Config.BACKUP_COUNT
+    backupCount = Config.BACKUP_COUNT
 )
 # 设置处理器级别为DEBUG
-handler.setLevel(logging.DEBUG)
-handler.setFormatter(logging.Formatter(
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(logging.Formatter(
     "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 ))
-logger.addHandler(handler)
+logger.addHandler(file_handler)
+
 
 
 # 指定用户写入长期记忆内容

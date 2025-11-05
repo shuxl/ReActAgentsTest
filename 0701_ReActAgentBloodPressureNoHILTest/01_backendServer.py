@@ -7,7 +7,6 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 import uuid
-from langgraph.types import interrupt, Command
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.postgres import AsyncPostgresStore
@@ -20,22 +19,26 @@ from datetime import timedelta, datetime
 from psycopg_pool import AsyncConnectionPool
 from psycopg.rows import dict_row
 import os
+# 先添加07项目的utils目录到路径（优先使用本地utils）
+current_dir = os.path.dirname(os.path.abspath(__file__))
+utils_dir = os.path.join(current_dir, "utils")
+if utils_dir not in sys.path:
+    sys.path.insert(0, utils_dir)
+# 再添加项目根目录到路径（用于其他依赖）
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 从本地utils目录导入（07项目的utils目录）
 from utils.config import Config
 from utils.llms import get_llm_by_config
 from utils.tools import get_tools
 
 
-
-
-# Author:@南哥AGI研习社 (B站 or YouTube 搜索“南哥AGI研习社”)
+# Author:@南哥AGI研习社 (B站 or YouTube 搜索"南哥AGI研习社")
 
 
 # 设置日志基本配置，级别为DEBUG或INFO
 logger = logging.getLogger(__name__)
 # 设置日志器级别为DEBUG
 logger.setLevel(logging.DEBUG)
-# logger.setLevel(logging.INFO)
 logger.handlers = []  # 清空默认处理器
 
 # 添加控制台处理器（StreamHandler），输出到控制台
@@ -52,9 +55,9 @@ file_handler = ConcurrentRotatingFileHandler(
     # 日志文件
     Config.LOG_FILE,
     # 日志文件最大允许大小为5MB，达到上限后触发轮转
-    maxBytes = Config.MAX_BYTES,
+    maxBytes=Config.MAX_BYTES,
     # 在轮转时，最多保留3个历史日志文件
-    backupCount = Config.BACKUP_COUNT
+    backupCount=Config.BACKUP_COUNT
 )
 # 设置处理器级别为DEBUG
 file_handler.setLevel(logging.DEBUG)
@@ -73,7 +76,7 @@ class AgentRequest(BaseModel):
     # 用户的问题
     query: str
     # 系统提示词
-    system_message: Optional[str] = "你会使用工具来帮助用户。如果工具使用被拒绝，请提示用户。"
+    system_message: Optional[str] = None
 
 # 定义数据模型 客户端发起的写入长期记忆的请求数据
 class LongMemRequest(BaseModel):
@@ -86,7 +89,7 @@ class LongMemRequest(BaseModel):
 class AgentResponse(BaseModel):
     # 会话唯一标识
     session_id: str
-    # 三个状态：interrupted, completed, error
+    # 两个状态：completed, error（移除了interrupted状态）
     status: str
     # 时间戳
     timestamp: float = Field(default_factory=lambda: time.time())
@@ -94,19 +97,6 @@ class AgentResponse(BaseModel):
     message: Optional[str] = None
     # completed时的结果消息
     result: Optional[Dict[str, Any]] = None
-    # interrupted时的中断消息
-    interrupt_data: Optional[Dict[str, Any]] = None
-
-# 定义数据模型 客户端发起的恢复智能体运行的中断反馈请求数据
-class InterruptResponse(BaseModel):
-    # 用户唯一标识
-    user_id: str
-    # 会话唯一标识
-    session_id: str
-    # 响应类型：accept(允许调用), edit(调整工具参数，此时args中携带修改后的调用参数), response(直接反馈信息，此时args中携带修改后的调用参数)，reject(不允许调用)
-    response_type: str
-    # 如果是edit, response类型，可能需要额外的参数
-    args: Optional[Dict[str, Any]] = None
 
 # 定义数据模型 系统内的会话状态响应数据
 class SystemInfoResponse(BaseModel):
@@ -131,7 +121,7 @@ class SessionStatusResponse(BaseModel):
     user_id: str
     # 会话唯一标识
     session_id: Optional[str] = None
-    # 状态：not_found, idle, running, interrupted, completed, error
+    # 状态：not_found, idle, running, completed, error（移除了interrupted状态）
     status: str
     # error时的提示消息
     message: Optional[str] = None
@@ -164,13 +154,6 @@ class RedisSessionManager:
         await self.redis_client.close()
 
     # 创建指定用户的新会话
-    # 存储结构：session:{user_id}:{session_id} = {
-    #   "session_id": session_id,
-    #   "status": "idle|running|interrupted|completed|error",
-    #   "last_response": AgentResponse,
-    #   "last_query": str,
-    #   "last_updated": timestamp
-    # }
     async def create_session(self, user_id: str, session_id: Optional[str] = None, status: str = "active",
                             last_query: Optional[str] = None, last_response: Optional['AgentResponse'] = None,
                             last_updated: Optional[float] = None, ttl: Optional[int] = None) -> str:
@@ -454,14 +437,14 @@ async def parse_messages(messages: List[Any]) -> None:
         print(f"消息 ID: {msg_id}")
         print("-" * 50)
 
-# 处理智能体返回结果 可能是中断，也可能是最终结果
+# 处理智能体返回结果（无中断版本）
 async def process_agent_result(
         session_id: str,
         result: Dict[str, Any],
         user_id: Optional[str] = None
 ) -> AgentResponse:
     """
-    处理智能体执行结果，统一处理中断和结果
+    处理智能体执行结果
 
     Args:
         session_id: 会话ID
@@ -474,27 +457,13 @@ async def process_agent_result(
     response = None
 
     try:
-        # 检查是否有中断
-        if "__interrupt__" in result:
-            interrupt_data = result["__interrupt__"][0].value
-            # 确保中断数据有类型信息
-            if "interrupt_type" not in interrupt_data:
-                interrupt_data["interrupt_type"] = "unknown"
-            # 返回中断信息
-            response = AgentResponse(
-                session_id=session_id,
-                status="interrupted",
-                interrupt_data=interrupt_data
-            )
-            logger.info(f"当前触发工具调用中断:{response}")
-        # 如果没有中断，返回最终结果
-        else:
-            response = AgentResponse(
-                session_id=session_id,
-                status="completed",
-                result=result
-            )
-            logger.info(f"最终智能体回复结果:{response}")
+        # 直接返回最终结果（无中断处理）
+        response = AgentResponse(
+            session_id=session_id,
+            status="completed",
+            result=result
+        )
+        logger.info(f"最终智能体回复结果:{response}")
 
     except Exception as e:
         response = AgentResponse(
@@ -524,13 +493,12 @@ def trimmed_messages_hook(state):
         strategy="last",
         token_counter=len,
         start_on="human",
-        # include_system=True,
         allow_partial=False
     )
     return {"llm_input_messages": trimmed_messages}
 
 # 读取指定用户长期记忆中的内容
-async def read_long_term_info(user_id :str):
+async def read_long_term_info(user_id: str):
     """
     读取指定用户长期记忆中的内容
 
@@ -579,7 +547,7 @@ async def read_long_term_info(user_id :str):
         )
 
 # 写入指定用户长期记忆内容
-async def write_long_term_info(user_id :str, memory_info :str):
+async def write_long_term_info(user_id: str, memory_info: str):
     """
     指定用户写入长期记忆内容
 
@@ -618,6 +586,50 @@ async def write_long_term_info(user_id :str, memory_info :str):
         )
 
 
+# 默认系统提示词：血压记录引导（无人工审查版本）
+DEFAULT_SYSTEM_MESSAGE = """你是一个专业的健康助手，专门帮助用户记录和管理血压数据。
+
+你的核心任务是：
+1. 友好地引导用户填写血压数据
+2. 收集收缩压、舒张压、测量日期时间和备注信息
+3. 验证数据的合理性
+4. 使用工具保存数据
+
+对话策略：
+- 主动问候用户，说明你的目的
+- 一次只询问一个信息项，避免一次性询问太多
+- 使用友好的语言，让用户感到舒适
+- 如果用户输入的数据不合理，友好地提示并请求重新输入
+- 在收集完所有数据后，向用户确认数据是否正确
+- 确认后使用 record_blood_pressure 工具保存数据
+
+血压数据验证规则：
+- 收缩压（Systolic）正常范围：90-140 mmHg，危险范围：>140 或 <90
+- 舒张压（Diastolic）正常范围：60-90 mmHg，危险范围：>90 或 <60
+- 收缩压必须大于舒张压
+- 如果数据超出正常范围，友好地提醒用户注意健康
+
+日期时间处理：
+- 用户可能以多种方式提供日期时间，如"今天早上8点"、"2024-01-15"、"昨天下午"等
+- record_blood_pressure 工具会自动将用户提供的日期时间转换为标准格式
+- 如果用户没有提供日期时间，系统会自动使用当前时间
+
+用户可能会：
+- 一次性提供所有信息：直接提取并验证
+- 分多次提供信息：逐步收集，记住已收集的信息
+- 拒绝填写：询问原因，提供替代方案
+- 修改已输入的信息：确认修改并更新
+- 查询信息：使用 info 命令查询用户设置和血压统计信息
+
+可用工具：
+- record_blood_pressure: 记录血压数据（自动处理日期时间转换）
+- query_blood_pressure: 查询历史血压记录
+- update_blood_pressure: 更新已存在的血压记录
+- info: 查询用户的基础信息（设置信息和血压统计信息）
+
+记住：始终以用户为中心，提供温暖、专业的服务。工具调用会自动执行，无需人工审批。"""
+
+
 # 生命周期函数 app应用初始化函数
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -632,45 +644,31 @@ async def lifespan(app: FastAPI):
         logger.info("Redis初始化成功")
 
         # 创建Chat模型
-        # llm_chat, llm_embedding = get_llm(Config.LLM_TYPE)
-        # 使用外层utils的llms.py中的get_llm_by_config方法（通过sys.path.append导入）
-        # 该方法会根据Config中的LLM_TYPE自动选择对应的LLM初始化方法
-        llm_chat = get_llm_by_config()
+        app.state.llm_chat = get_llm_by_config()
         logger.info("Chat模型初始化成功")
 
         # 创建数据库连接池 动态连接池根据负载调整连接池大小
         # 注意：添加 row_factory=dict_row 使查询返回字典而不是元组，解决AsyncPostgresStore.setup()的问题
-        async with AsyncConnectionPool(
-                conninfo=Config.DB_URI,
-                min_size=Config.MIN_SIZE,
-                max_size=Config.MAX_SIZE,
-                kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}
-        ) as pool:
-            # 短期记忆 初始化checkpointer，并初始化表结构
-            app.state.checkpointer = AsyncPostgresSaver(pool)
-            await app.state.checkpointer.setup()
-            logger.info("短期记忆Checkpointer初始化成功")
+        app.state.pool = AsyncConnectionPool(
+            conninfo=Config.DB_URI,
+            min_size=Config.MIN_SIZE,
+            max_size=Config.MAX_SIZE,
+            kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}
+        )
+        await app.state.pool.open()
+        
+        # 短期记忆 初始化checkpointer，并初始化表结构
+        app.state.checkpointer = AsyncPostgresSaver(app.state.pool)
+        await app.state.checkpointer.setup()
+        logger.info("短期记忆Checkpointer初始化成功")
 
-            # 长期记忆 初始化store，并初始化表结构
-            app.state.store = AsyncPostgresStore(pool)
-            await app.state.store.setup()
-            logger.info("长期记忆store初始化成功")
+        # 长期记忆 初始化store，并初始化表结构
+        app.state.store = AsyncPostgresStore(app.state.pool)
+        await app.state.store.setup()
+        logger.info("长期记忆store初始化成功")
 
-            # 获取工具列表
-            tools = await get_tools()
-
-            # 创建ReAct Agent 并存储为单实例
-            app.state.agent = create_react_agent(
-                model=llm_chat,
-                tools=tools,
-                pre_model_hook=trimmed_messages_hook,
-                checkpointer=app.state.checkpointer,
-                store=app.state.store
-            )
-            logger.info("Agent初始化成功")
-
-            logger.info("服务完成初始化并启动服务")
-            yield
+        logger.info("服务完成初始化并启动服务")
+        yield
 
     except Exception as e:
         logger.error(f"初始化失败: {str(e)}")
@@ -681,20 +679,21 @@ async def lifespan(app: FastAPI):
         # 关闭Redis连接
         await app.state.session_manager.close()
         # 关闭PostgreSQL连接池
-        await pool.close()
+        if hasattr(app.state, 'pool'):
+            await app.state.pool.close()
         logger.info("关闭服务并完成资源清理")
 
 # 实例化app 并使用生命周期上下文管理器进行app初始化
 app = FastAPI(
-    title="Agent智能体后端API接口服务",
-    description="基于LangGraph提供AI Agent服务",
+    title="Agent智能体后端API接口服务(血压记录-无人工审查)",
+    description="基于LangGraph提供AI Agent服务，专门用于血压记录管理，无人工审查功能",
     lifespan=lifespan
 )
 
 # API接口:运行智能体并返回大模型结果或中断数据
 @app.post("/agent/invoke", response_model=AgentResponse)
 async def invoke_agent(request: AgentRequest):
-    logger.info(f"调用/agent/invoke接口，运行智能体并返回大模型结果或中断数据，接受到前端用户请求:{request}")
+    logger.info(f"调用/agent/invoke接口，运行智能体并返回大模型结果，接受到前端用户请求:{request}")
     # 获取用户请求中的user_id和session_id
     user_id = request.user_id
     session_id = request.session_id
@@ -706,14 +705,14 @@ async def invoke_agent(request: AgentRequest):
         long_term_info = result.get("long_term_info")
         # 若获取到的内容不为空 则将记忆内容拼接到系统提示词中
         if long_term_info:
-            system_message = f"{request.system_message}我的附加信息有:{long_term_info}"
+            system_message = f"{request.system_message or DEFAULT_SYSTEM_MESSAGE}\n\n我的附加信息有:{long_term_info}"
             logger.info(f"获取用户偏好配置数据，system_message的信息为:{system_message}")
         # 若获取到的内容为空，则直接使用系统提示词
         else:
-            system_message = request.system_message
+            system_message = request.system_message or DEFAULT_SYSTEM_MESSAGE
             logger.info(f"未获取到用户偏好配置数据，system_message的信息为:{system_message}")
     else:
-        system_message = request.system_message
+        system_message = request.system_message or DEFAULT_SYSTEM_MESSAGE
         logger.info(f"未获取到用户偏好配置数据，system_message的信息为:{system_message}")
 
     # 判断当前用户会话是否存在
@@ -737,6 +736,18 @@ async def invoke_agent(request: AgentRequest):
     ttl = Config.TTL
     await app.state.session_manager.update_session(user_id, session_id, status, last_query, last_response, last_updated, ttl)
 
+    # 获取工具列表（传递store和user_id）
+    tools = await get_tools(store=app.state.store, user_id=user_id)
+
+    # 创建ReAct Agent
+    agent = create_react_agent(
+        model=app.state.llm_chat,
+        tools=tools,
+        pre_model_hook=trimmed_messages_hook,
+        checkpointer=app.state.checkpointer,
+        store=app.state.store
+    )
+
     # 构造智能体输入消息体
     messages = [
         {"role": "system", "content": system_message},
@@ -745,7 +756,7 @@ async def invoke_agent(request: AgentRequest):
 
     try:
         # 先调用智能体
-        result = await app.state.agent.ainvoke({"messages": messages}, config={"configurable": {"thread_id": session_id}})
+        result = await agent.ainvoke({"messages": messages}, config={"configurable": {"thread_id": session_id}})
         # 将返回的messages进行格式化输出 方便查看调试
         await parse_messages(result['messages'])
 
@@ -758,71 +769,6 @@ async def invoke_agent(request: AgentRequest):
             session_id=session_id,
             status="error",
             message=f"处理请求时出错: {str(e)}"
-        )
-        logger.error(f"处理请求时出错: {error_response}")
-
-        # 更新会话状态
-        status = "error"
-        last_query = None
-        last_response = error_response
-        last_updated = time.time()
-        ttl = Config.TTL
-        await app.state.session_manager.update_session(user_id, session_id, status, last_query, last_response, last_updated, ttl)
-
-        return error_response
-
-# API接口:恢复被中断的智能体运行并等待运行完成或再次中断
-@app.post("/agent/resume", response_model=AgentResponse)
-async def resume_agent(response: InterruptResponse):
-    logger.info(f"调用/agent/resume接口，恢复被中断的智能体运行并等待运行完成或再次中断，接受到前端用户请求:{response}")
-    # 获取用户请求中的user_id和session_id
-    user_id = response.user_id
-    session_id = response.session_id
-
-    # 判断当前用户会话是否存在
-    exists = await app.state.session_manager.session_id_exists(user_id, session_id)
-    # 若用户不存在 则抛出异常
-    if not exists:
-        logger.error(f"status_code=404,用户会话 {user_id}:{session_id} 不存在")
-        raise HTTPException(status_code=404, detail=f"用户会话 {user_id}:{session_id} 不存在")
-
-    # 检查会话状态是否为中断 若不是中断则抛出异常
-    session = await app.state.session_manager.get_session(user_id, session_id)
-    status = session.get("status")
-    if status != "interrupted":
-        logger.error(f"status_code=400,会话当前状态为 {status}，无法恢复非中断状态的会话")
-        raise HTTPException(status_code=400, detail=f"会话当前状态为 {status}，无法恢复非中断状态的会话")
-
-    # 更新会话状态
-    status = "running"
-    last_query = None
-    last_response = None
-    last_updated = time.time()
-    ttl = Config.TTL
-    await app.state.session_manager.update_session(user_id, session_id, status, last_query, last_response, last_updated, ttl)
-
-    # 构造响应数据
-    command_data = {
-        "type": response.response_type
-    }
-    # 如果提供了参数，添加到响应数据中
-    if response.args:
-        command_data["args"] = response.args
-
-    try:
-        # 先恢复智能体执行
-        result = await app.state.agent.ainvoke(Command(resume=command_data), config={"configurable": {"thread_id": session_id}})
-        # 将返回的messages进行格式化输出 方便查看调试
-        await parse_messages(result['messages'])
-        # 再处理结果并更新会话状态
-        return await process_agent_result(session_id, result, user_id)
-
-    except Exception as e:
-        # 异常处理
-        error_response = AgentResponse(
-            session_id=session_id,
-            status="error",
-            message=f"恢复执行时出错: {str(e)}"
         )
         logger.error(f"处理请求时出错: {error_response}")
 
@@ -981,7 +927,7 @@ async def write_long_term(request: LongMemRequest):
         )
 
 
-
 # 启动服务器
 if __name__ == "__main__":
     uvicorn.run(app, host=Config.HOST, port=Config.PORT)
+

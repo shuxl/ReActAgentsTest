@@ -1,0 +1,25 @@
+# V2.0 多智能体路由系统依赖包
+
+# LangGraph和LangChain
+langgraph>=0.2.0
+langchain>=0.3.0
+langchain-core>=0.3.0
+
+# FastAPI和Web框架
+fastapi>=0.100.0
+uvicorn>=0.20.0
+
+# 数据库
+psycopg[binary,pool]>=3.1.0
+asyncpg>=0.29.0  # 可选，如果使用asyncpg
+
+# Redis
+redis>=5.0.0
+
+# 日志
+concurrent-log-handler>=0.9.20
+
+# 其他工具
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+

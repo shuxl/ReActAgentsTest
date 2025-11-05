@@ -361,7 +361,7 @@ async def lifespan(app: FastAPI):
         logger.info("Redis初始化成功")
 
         # 创建Chat模型
-        # 使用外层utils的llms.py中的get_llm_by_config方法
+        # 使用外层utils的llms.py中的get_llm_by_config方法（通过sys.path.append导入）
         # 该方法会根据Config中的LLM_TYPE自动选择对应的LLM初始化方法
         llm_chat = get_llm_by_config()
         logger.info("Chat模型初始化成功")
