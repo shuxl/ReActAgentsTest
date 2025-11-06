@@ -10,6 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 from .router_state import RouterState
 from .router import router_node, clarify_intent_node, route_decision
 from .agents.blood_pressure_agent import create_blood_pressure_agent_node
+from .agents.appointment_agent import create_appointment_agent_node
 from .config import Config
 
 logger = logging.getLogger(__name__)
@@ -69,18 +70,21 @@ def create_router_graph(checkpointer: AsyncPostgresSaver, pool: AsyncConnectionP
     router_graph.add_node("clarify_intent", clarify_intent_node)  # 意图澄清节点
     
     # 添加专门智能体节点
-    # 使用数据库连接池来访问blood_pressure_records表
+    # 使用数据库连接池来访问业务表
     if pool:
         # 使用工厂函数创建节点，传递pool、checkpointer和store
         blood_pressure_node = create_blood_pressure_agent_node(pool, checkpointer, store)
         router_graph.add_node("blood_pressure_agent", blood_pressure_node)
+        
+        appointment_node = create_appointment_agent_node(pool, checkpointer, store)
+        router_graph.add_node("appointment_agent", appointment_node)
     else:
         # 如果没有pool，使用占位节点
         logger.warning("数据库连接池未提供，使用占位节点")
         router_graph.add_node("blood_pressure_agent", placeholder_agent_node)
+        router_graph.add_node("appointment_agent", placeholder_agent_node)
     
     # 其他智能体节点仍使用占位节点（待实现）
-    router_graph.add_node("appointment_agent", placeholder_agent_node)
     router_graph.add_node("doctor_assistant_agent", placeholder_agent_node)
     
     # 设置入口点：每次调用都从router节点开始
